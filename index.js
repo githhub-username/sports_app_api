@@ -1,6 +1,6 @@
-// Server setup (index.js)
 const express = require("express");
 const path = require("path"); // To handle file paths
+const fs = require('fs'); // To manage file system operations
 require('./config'); // Configuration (like DB connection)
 const merch = require('./merch'); // Import merchandise model
 const upload = require('./function'); // Import file upload logic
@@ -50,14 +50,31 @@ app.post("/create", upload.array('merch_images', 5), async (req, resp) => {
     }
 });
 
-// Update merchandise details
+// Update merchandise details and handle image replacement
 app.put("/update/:_id", upload.array('merch_images', 5), async (req, resp) => {
     try {
         let updatedFields = { ...req.body };
 
+        // Fetch the current merch item to delete old images
+        const merchItem = await merch.findById(req.params._id);
+        if (!merchItem) {
+            return resp.status(404).send({ error: "Merch item not found" });
+        }
+
         // Check if files were uploaded
         if (req.files && req.files.length > 0) {
-            const imagePaths = req.files.map(file => file.filename); // Get filenames without the path
+            if (merchItem.images && merchItem.images.length > 0) {
+                // Delete the old images from the server
+                merchItem.images.forEach(image => {
+                    const imagePath = path.join(__dirname, 'merch_images', path.basename(image));
+                    if (fs.existsSync(imagePath)) {
+                        fs.unlinkSync(imagePath); // Remove the old image file
+                    }
+                });
+            }
+
+            // Upload new images
+            const imagePaths = req.files.map(file => file.filename); // Get filenames
             updatedFields.images = imagePaths.map(image => `${req.protocol}://${req.get('host')}/merch_images/${image}`); // Generate full URLs
         }
 
@@ -68,11 +85,11 @@ app.put("/update/:_id", upload.array('merch_images', 5), async (req, resp) => {
             { new: true }
         );
 
-        // Re-fetch the updated item to ensure we get the latest state
+        // Re-fetch the updated item
         const updatedItem = await merch.findById(data._id);
         const formattedItem = {
             ...updatedItem.toObject(),
-            images: updatedItem.images.map(image => `${req.protocol}://${req.get('host')}/merch_images/${image}`) // Format URLs
+            images: updatedItem.images.map(image => `${req.protocol}://${req.get('host')}/merch_images/${image}`)
         };
 
         resp.send(formattedItem);
@@ -85,23 +102,33 @@ app.put("/update/:_id", upload.array('merch_images', 5), async (req, resp) => {
 // Delete merchandise
 app.delete("/delete/:_id", async (req, resp) => {
     try {
+        const merchItem = await merch.findById(req.params._id);
+        if (merchItem && merchItem.images.length > 0) {
+            // Delete all images related to the merch
+            merchItem.images.forEach(image => {
+                const imagePath = path.join(__dirname, 'merch_images', path.basename(image));
+                if (fs.existsSync(imagePath)) {
+                    fs.unlinkSync(imagePath); // Remove the old image file
+                }
+            });
+        }
+
+        // Delete merch item from the database
         const data = await merch.deleteOne({ _id: req.params._id });
         resp.send(data);
     } catch (error) {
+        console.error(error);
         resp.status(500).send({ error: "Error deleting the merch item" });
     }
 });
 
 // Search merchandise by name
 app.get("/search/:key", async (req, resp) => {
-    console.log(req.params.key);
-    let data = await merch.find(
-        {
-            "$or": [
-                { "name": { $regex: req.params.key, $options: 'i' } }, // Case-insensitive search
-            ]
-        }
-    );
+    let data = await merch.find({
+        "$or": [
+            { "name": { $regex: req.params.key, $options: 'i' } }, // Case-insensitive search
+        ]
+    });
 
     // Format image URLs
     const formattedData = data.map(item => ({
@@ -116,32 +143,27 @@ app.get("/search/:key", async (req, resp) => {
 app.put("/like/:_id", async (req, resp) => {
     try {
         const userId = req.body.userId; // Assume the user's ID is sent in the request body
-
-        // Find the merch item by ID
         const merchItem = await merch.findById(req.params._id);
 
         if (!merchItem) {
             return resp.status(404).send({ error: "Merch item not found" });
         }
 
-        // Check if the user has already liked the merch
         const alreadyLiked = merchItem.likedBy.includes(userId);
 
         if (alreadyLiked) {
             // User wants to unlike the merch item
             merchItem.likes -= 1;
-            merchItem.likedBy = merchItem.likedBy.filter(user => user !== userId); // Remove user from likedBy array
+            merchItem.likedBy = merchItem.likedBy.filter(user => user !== userId);
             message = "Merch item unliked successfully";
         } else {
             // User wants to like the merch item
             merchItem.likes += 1;
-            merchItem.likedBy.push(userId); // Add user to likedBy array
+            merchItem.likedBy.push(userId);
             message = "Merch item liked successfully";
         }
 
-        // Save the updated merch item
         await merchItem.save();
-
         resp.send({ message, merchItem });
     } catch (error) {
         console.error(error);
