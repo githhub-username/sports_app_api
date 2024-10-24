@@ -37,7 +37,7 @@ app.post("/create", upload.array('merch_images', 5), async (req, resp) => {
         const baseUrl = `${req.protocol}://${req.get('host')}`;
 
         // Get the image paths and convert them to full URLs
-        const images = req.files.map(file => `${baseUrl}/merch_images/${file.filename}`);
+        const images = req.files.map(file => `${baseUrl}/${imgPath}`);
 
         const data = new merch({
             name: req.body.name,
