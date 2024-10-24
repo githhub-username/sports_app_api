@@ -1,47 +1,37 @@
+// Server setup (index.js)
 const express = require("express");
-require('./config'); // MongoDB connection setup
-const merch = require('./merch'); // Mongoose model
-const upload = require('./function'); // Multer upload function
-const path = require('path');
+const path = require("path"); // To handle file paths
+require('./config'); // Configuration (like DB connection)
+const merch = require('./merch'); // Import merchandise model
+const upload = require('./function'); // Import file upload logic
 
 const app = express();
 app.use(express.json());
 
-// Serve static files for images (make merch_images accessible globally)
+// Serve static files (images) from the merch_images directory
 app.use('/merch_images', express.static(path.join(__dirname, 'merch_images')));
 
-// List all merchandise items (fetch data with global image URLs)
+// List all merchandise items
 app.get("/list", async (req, resp) => {
-    try {
-        // Dynamically generate the base URL for the images
-        const baseUrl = `${req.protocol}://${req.get('host')}`;
+    let data = await merch.find();
+    
+    // Generate full URLs for images
+    const formattedData = data.map(item => ({
+        ...item.toObject(),
+        images: item.images.map(image => `${req.protocol}://${req.get('host')}/merch_images/${image}`)
+    }));
 
-        let data = await merch.find();
-        // Modify image paths to be full URLs
-        data = data.map(item => {
-            item.images = item.images.map(imgPath => `${baseUrl}/${imgPath}`);
-            return item;
-        });
-
-        resp.send(data);
-    } catch (error) {
-        console.error(error);
-        resp.status(500).send("Error fetching merchandise.");
-    }
+    resp.send(formattedData);
 });
 
 // Create new merchandise with multiple image upload
 app.post("/create", upload.array('merch_images', 5), async (req, resp) => {
     try {
-        // Dynamically generate the base URL for the images
-        const baseUrl = `${req.protocol}://${req.get('host')}`;
-
-        // Get the image paths and convert them to full URLs
-        const images = req.files.map(file => `${baseUrl}/${imgPath}`);
+        const images = req.files.map(file => file.filename); // Get filenames without the path
 
         const data = new merch({
             name: req.body.name,
-            images: images,  // Store full image URLs
+            images: images,
             designBy: req.body.designBy,
             description: req.body.description,
             likes: req.body.likes || 0,
@@ -50,21 +40,20 @@ app.post("/create", upload.array('merch_images', 5), async (req, resp) => {
 
         const result = await data.save();
         console.log(result);
-        resp.send(result);
+        resp.send({
+            ...result.toObject(),
+            images: images.map(image => `${req.protocol}://${req.get('host')}/merch_images/${image}`) // Full URLs
+        });
     } catch (error) {
         console.error(error);
         resp.status(500).send("Error while creating merchandise.");
     }
 });
 
-// Update merchandise (only text fields, images cannot be changed)
+// Update merchandise details
 app.put("/update/:_id", async (req, resp) => {
     try {
-        let updatedFields = {
-            name: req.body.name,
-            description: req.body.description,
-            cost: req.body.cost,
-        };
+        let updatedFields = { ...req.body };
 
         // Update the document
         let data = await merch.findByIdAndUpdate(
@@ -72,7 +61,15 @@ app.put("/update/:_id", async (req, resp) => {
             { $set: updatedFields },
             { new: true }
         );
-        resp.send(data);
+
+        // Re-fetch the updated item and format image URLs
+        const updatedItem = await merch.findById(data._id);
+        const formattedItem = {
+            ...updatedItem.toObject(),
+            images: updatedItem.images.map(image => `${req.protocol}://${req.get('host')}/merch_images/${image}`)
+        };
+
+        resp.send(formattedItem);
     } catch (err) {
         resp.status(500).send({ error: "Error updating the merch item" });
     }
@@ -81,37 +78,34 @@ app.put("/update/:_id", async (req, resp) => {
 // Delete merchandise
 app.delete("/delete/:_id", async (req, resp) => {
     try {
-        let data = await merch.findByIdAndDelete(req.params._id);
+        const data = await merch.deleteOne({ _id: req.params._id });
         resp.send(data);
     } catch (error) {
-        console.error(error);
-        resp.status(500).send("Error deleting merchandise.");
+        resp.status(500).send({ error: "Error deleting the merch item" });
     }
 });
 
 // Search merchandise by name
 app.get("/search/:key", async (req, resp) => {
-    try {
-        const baseUrl = `${req.protocol}://${req.get('host')}`;
+    console.log(req.params.key);
+    let data = await merch.find(
+        {
+            "$or": [
+                { "name": { $regex: req.params.key, $options: 'i' } }, // Case-insensitive search
+            ]
+        }
+    );
 
-        let data = await merch.find({
-            name: { $regex: req.params.key, $options: 'i' } // Case-insensitive search
-        });
+    // Format image URLs
+    const formattedData = data.map(item => ({
+        ...item.toObject(),
+        images: item.images.map(image => `${req.protocol}://${req.get('host')}/merch_images/${image}`)
+    }));
 
-        // Modify image paths to be full URLs
-        data = data.map(item => {
-            item.images = item.images.map(imgPath => `${baseUrl}/${imgPath}`);
-            return item;
-        });
-
-        resp.send(data);
-    } catch (error) {
-        console.error(error);
-        resp.status(500).send("Error searching merchandise.");
-    }
+    resp.send(formattedData);
 });
 
-// Toggle like/unlike on a merch item
+// Route to handle toggling like/unlike on a merch item
 app.put("/like/:_id", async (req, resp) => {
     try {
         const userId = req.body.userId; // Assume the user's ID is sent in the request body
@@ -149,6 +143,7 @@ app.put("/like/:_id", async (req, resp) => {
 });
 
 // Start the server
-app.listen(6000, () => {
-    console.log("Server running on port 6000");
+const PORT = process.env.PORT || 6000;
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
 });
