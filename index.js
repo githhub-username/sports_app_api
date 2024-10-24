@@ -51,9 +51,15 @@ app.post("/create", upload.array('merch_images', 5), async (req, resp) => {
 });
 
 // Update merchandise details
-app.put("/update/:_id", async (req, resp) => {
+app.put("/update/:_id", upload.array('merch_images', 5), async (req, resp) => {
     try {
         let updatedFields = { ...req.body };
+
+        // Check if files were uploaded
+        if (req.files && req.files.length > 0) {
+            const imagePaths = req.files.map(file => file.filename); // Get filenames without the path
+            updatedFields.images = imagePaths.map(image => `${req.protocol}://${req.get('host')}/merch_images/${image}`); // Generate full URLs
+        }
 
         // Update the document
         let data = await merch.findByIdAndUpdate(
@@ -62,15 +68,16 @@ app.put("/update/:_id", async (req, resp) => {
             { new: true }
         );
 
-        // Re-fetch the updated item and format image URLs
+        // Re-fetch the updated item to ensure we get the latest state
         const updatedItem = await merch.findById(data._id);
         const formattedItem = {
             ...updatedItem.toObject(),
-            images: updatedItem.images.map(image => `${req.protocol}://${req.get('host')}/merch_images/${image}`)
+            images: updatedItem.images.map(image => `${req.protocol}://${req.get('host')}/merch_images/${image}`) // Format URLs
         };
 
         resp.send(formattedItem);
     } catch (err) {
+        console.error(err);
         resp.status(500).send({ error: "Error updating the merch item" });
     }
 });
@@ -141,7 +148,6 @@ app.put("/like/:_id", async (req, resp) => {
         resp.status(500).send({ error: "Error updating the like status" });
     }
 });
-
 
 // Start the server
 const PORT = process.env.PORT || 6000;
