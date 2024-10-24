@@ -8,8 +8,14 @@ const upload = require('./function'); // Import file upload logic
 const app = express();
 app.use(express.json());
 
+// Create merch_images directory if it doesn't exist
+const imageDirectory = path.join(__dirname, 'merch_images');
+if (!fs.existsSync(imageDirectory)) {
+    fs.mkdirSync(imageDirectory, { recursive: true });
+}
+
 // Serve static files (images) from the merch_images directory
-app.use('/merch_images', express.static(path.join(__dirname, 'merch_images')));
+app.use('/merch_images', express.static(imageDirectory));
 
 // List all merchandise items
 app.get("/list", async (req, resp) => {
@@ -66,7 +72,7 @@ app.put("/update/:_id", upload.array('merch_images', 5), async (req, resp) => {
             if (merchItem.images && merchItem.images.length > 0) {
                 // Delete the old images from the server
                 merchItem.images.forEach(image => {
-                    const imagePath = path.join(__dirname, 'merch_images', path.basename(image));
+                    const imagePath = path.join(imageDirectory, path.basename(image));
                     if (fs.existsSync(imagePath)) {
                         fs.unlinkSync(imagePath); // Remove the old image file
                     }
@@ -106,7 +112,7 @@ app.delete("/delete/:_id", async (req, resp) => {
         if (merchItem && merchItem.images.length > 0) {
             // Delete all images related to the merch
             merchItem.images.forEach(image => {
-                const imagePath = path.join(__dirname, 'merch_images', path.basename(image));
+                const imagePath = path.join(imageDirectory, path.basename(image));
                 if (fs.existsSync(imagePath)) {
                     fs.unlinkSync(imagePath); // Remove the old image file
                 }
